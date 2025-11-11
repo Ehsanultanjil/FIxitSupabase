@@ -3,8 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'reac
 import { useTheme } from '@/components/common/ThemeProvider';
 import { useAuth } from '@/contexts/AuthContext';
 import { Lock, Eye, EyeOff } from 'lucide-react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiPost } from '@/services/api';
+import { supabase } from '@/config/supabase';
 
 export function ChangePassword() {
   const { theme, isDark } = useTheme();
@@ -61,12 +60,19 @@ export function ChangePassword() {
 
     try {
       setLoading(true);
-      const token = await AsyncStorage.getItem('token');
       
-      await apiPost('/auth/change-password', {
-        currentPassword,
-        newPassword
-      }, token || undefined);
+      // Call Supabase RPC function to change password
+      const { data, error } = await supabase.rpc('change_password', {
+        p_user_id: user.id,
+        p_current_password: currentPassword,
+        p_new_password: newPassword
+      });
+
+      if (error) throw error;
+
+      if (!data.success) {
+        throw new Error(data.message || 'Current password incorrect');
+      }
 
       Alert.alert('Success', 'Password changed successfully');
       clearForm();

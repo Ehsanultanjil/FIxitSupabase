@@ -5,8 +5,7 @@ import { ArrowLeft, Mail, Phone, AlertTriangle } from 'lucide-react-native';
 import { Card } from '@/components/common/Card';
 import { useTheme } from '@/components/common/ThemeProvider';
 import { useAuth } from '@/contexts/AuthContext';
-import { apiPost } from '@/services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '@/config/supabase';
 
 export default function HelpScreen() {
   const router = useRouter();
@@ -24,15 +23,34 @@ export default function HelpScreen() {
 
     try {
       setDeleting(true);
-      const token = await AsyncStorage.getItem('token');
       
-      const response = await apiPost('/auth/delete-reports', {
-        password: deletePassword
-      }, token || undefined);
+      if (!user) {
+        Alert.alert('Error', 'User not found');
+        return;
+      }
+
+      // Verify password first
+      const { data: verifyData, error: verifyError } = await supabase.rpc('verify_login', {
+        p_user_id: user.id,
+        p_password: deletePassword
+      });
+
+      if (verifyError || !verifyData?.success) {
+        Alert.alert('Error', 'Incorrect password');
+        return;
+      }
+
+      // Delete all reports for this user
+      const { error: deleteError } = await supabase
+        .from('reports')
+        .delete()
+        .eq('student_id', user.studentId);
+
+      if (deleteError) throw deleteError;
 
       Alert.alert(
         'Reports Deleted', 
-        `Successfully deleted ${response.deletedCount} reports. All report history has been cleared.`,
+        'All your reports have been permanently deleted.',
         [
           {
             text: 'OK',
@@ -45,8 +63,7 @@ export default function HelpScreen() {
       );
     } catch (error: any) {
       console.error('Delete reports error:', error);
-      const errorMessage = error?.response?.data?.error || 'Failed to delete reports';
-      Alert.alert('Error', errorMessage);
+      Alert.alert('Error', 'Failed to delete reports');
     } finally {
       setDeleting(false);
     }

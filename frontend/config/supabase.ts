@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Hardcoded for production APK builds (env variables don't work in APK)
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://netpezpwfiqhsgzbqfrt.supabase.co';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ldHBlenB3ZmlxaHNnemJxZnJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4NzAyNTQsImV4cCI6MjA3ODQ0NjI1NH0.G_ialVK7BZ5SwztJ_odTcU4492Cpo2TwvSW9PIrzXRs';
 
 console.log('🔧 Supabase URL:', supabaseUrl);
 console.log('🔧 Supabase Key exists:', !!supabaseAnonKey);
