@@ -36,7 +36,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "59e9af4e-220b-4a5b-8991-94b3ddf81039"
+        "projectId": "bb2c5be2-8a34-466b-9221-dac0f63259b6"
       }
     },
     "android": {
@@ -51,6 +51,6 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
-    "owner": "karimtanjil1"
+    "owner": "tanjil189"
   }
 }
