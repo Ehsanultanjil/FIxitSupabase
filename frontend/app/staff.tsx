@@ -66,7 +66,7 @@ export default function StaffScreen() {
             staffId: staff.staff_id,
             name: staff.name,
             total: staffReports.length,
-            pending: staffReports.filter((r: any) => r.status === 'pending').length,
+            pending: 0, // Not used - reports assigned are already in-progress
             inProgress: staffReports.filter((r: any) => r.status === 'in-progress').length,
             completed: staffReports.filter((r: any) => ['completed', 'resolved'].includes(r.status)).length,
           };
@@ -188,7 +188,6 @@ export default function StaffScreen() {
                 )}
                 <View style={styles.kpis}>
                   <Text style={[styles.kpi, { color: theme.colors.textSecondary }]}>Total: {s.total}</Text>
-                  <Text style={[styles.kpi, { color: theme.colors.textSecondary }]}>Pending: {s.pending}</Text>
                   <Text style={[styles.kpi, { color: theme.colors.textSecondary }]}>In-Progress: {s.inProgress}</Text>
                   <Text style={[styles.kpi, { color: theme.colors.textSecondary }]}>Completed: {s.completed}</Text>
                 </View>

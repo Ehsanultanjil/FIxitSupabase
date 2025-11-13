@@ -39,6 +39,7 @@ interface StaffMember {
   pending: number;
   inProgress: number;
   completed: number;
+  pendingCount?: number; // Current in-progress issues count
 }
 
 export function AdminReports() {
@@ -113,7 +114,30 @@ export function AdminReports() {
       }
       
       console.log('✅ Staff loaded:', data?.length || 0);
-      setStaffMembers(data || []);
+      
+      // Calculate workload for each staff member
+      const staffWithWorkload = await Promise.all((data || []).map(async (staff) => {
+        const { data: reports, error: reportsError } = await supabase
+          .from('reports')
+          .select('status')
+          .eq('assigned_to', staff.staff_id);
+        
+        const inProgressCount = reports?.filter(r => r.status === 'in-progress').length || 0;
+        
+        console.log(`📊 Staff ${staff.name} (${staff.staff_id}): ${inProgressCount} in-progress issues`);
+        
+        return {
+          ...staff,
+          pendingCount: inProgressCount
+        };
+      }));
+      
+      // Sort by in-progress count (least to most)
+      staffWithWorkload.sort((a, b) => a.pendingCount - b.pendingCount);
+      
+      console.log('✅ Staff sorted by workload:', staffWithWorkload.map(s => `${s.name}: ${s.pendingCount}`));
+      
+      setStaffMembers(staffWithWorkload);
     } catch (e) {
       console.error('Error loading staff:', e);
       setStaffMembers([]);
@@ -125,6 +149,15 @@ export function AdminReports() {
   useEffect(() => {
     reloadAllReports();
     loadStaffMembers();
+
+    // Auto-refresh every 3 seconds
+    const interval = setInterval(() => {
+      reloadAllReports();
+      loadStaffMembers();
+    }, 3000); // 3 seconds
+
+    // Cleanup interval on component unmount
+    return () => clearInterval(interval);
   }, []);
 
   const rejectReport = async (reportId: string, note: string) => {
@@ -542,8 +575,8 @@ export function AdminReports() {
                         <Text style={[styles.dropdownOptionText, { color: '#FFFFFF' }]}>
                           {staff.name} ({staff.staff_id})
                         </Text>
-                        <Text style={[styles.taskCountText, { color: 'rgba(255,255,255,0.8)' }]}>
-                          Available for assignment
+                        <Text style={[styles.taskCountText, { color: (staff.pendingCount || 0) === 0 ? '#10B981' : (staff.pendingCount || 0) <= 2 ? '#F59E0B' : '#EF4444' }]}>
+                          {(staff.pendingCount || 0) === 0 ? '✓ Available' : `${staff.pendingCount} in-progress ${staff.pendingCount === 1 ? 'issue' : 'issues'}`}
                         </Text>
                       </View>
                     </View>
