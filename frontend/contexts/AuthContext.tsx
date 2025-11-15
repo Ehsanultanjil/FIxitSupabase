@@ -42,26 +42,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (id: string, password: string, role: 'student' | 'admin' | 'staff'): Promise<boolean> => {
     try {
-      console.log('🔐 Attempting login with ID:', id, 'Role:', role);
-
-      // Call custom verify_login function
       const { data, error } = await supabase.rpc('verify_login', {
         p_identifier: id,
         p_password: password,
         p_role: role
       });
 
-      if (error) {
-        console.error('❌ Auth error:', error);
-        throw error;
-      }
+      if (error) throw error;
 
-      if (!data.success) {
-        console.error('❌ Login failed:', data.error);
-        throw new Error(data.error || 'Invalid credentials');
-      }
-
-      console.log('✅ Auth successful, user:', data.user);
+      if (!data.success) throw new Error(data.error || 'Invalid credentials');
 
       const userData = data.user;
       setUser(userData as User);
@@ -69,7 +58,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true;
     } catch (error: any) {
       const errMsg = error?.message || 'Login failed. Please check your credentials.';
-      console.error('❌ Login error:', errMsg, error);
       return false;
     }
   };

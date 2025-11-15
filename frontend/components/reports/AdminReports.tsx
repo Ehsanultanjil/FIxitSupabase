@@ -40,6 +40,7 @@ interface StaffMember {
   inProgress: number;
   completed: number;
   pendingCount?: number; // Current in-progress issues count
+  expertise?: string; // Staff specialization
 }
 
 export function AdminReports() {
@@ -65,8 +66,9 @@ export function AdminReports() {
   const [assignmentNote, setAssignmentNote] = useState('');
   const [pendingAssignment, setPendingAssignment] = useState<{ id: string; staffId: string } | null>(null);
 
-  const reloadAllReports = async () => {
+  const reloadAllReports = async (silent = false) => {
     try {
+      if (!silent) setLoading(true);
       console.log('📊 AdminReports: Loading all reports...');
       const { data, error } = await supabase
         .from('reports')
@@ -98,22 +100,16 @@ export function AdminReports() {
     setRefreshing(false);
   };
 
-  const loadStaffMembers = async () => {
+  const loadStaffMembers = async (silent = false) => {
     try {
       setStaffLoading(true);
-      console.log('👥 Loading staff members...');
       const { data, error } = await supabase
         .from('users')
         .select('*')
         .eq('role', 'staff')
         .order('name', { ascending: true });
       
-      if (error) {
-        console.error('❌ Staff loading error:', error);
-        throw error;
-      }
-      
-      console.log('✅ Staff loaded:', data?.length || 0);
+      if (error) throw error;
       
       // Calculate workload for each staff member
       const staffWithWorkload = await Promise.all((data || []).map(async (staff) => {
@@ -124,18 +120,13 @@ export function AdminReports() {
         
         const inProgressCount = reports?.filter(r => r.status === 'in-progress').length || 0;
         
-        console.log(`📊 Staff ${staff.name} (${staff.staff_id}): ${inProgressCount} in-progress issues`);
-        
         return {
           ...staff,
           pendingCount: inProgressCount
         };
       }));
       
-      // Sort by in-progress count (least to most)
       staffWithWorkload.sort((a, b) => a.pendingCount - b.pendingCount);
-      
-      console.log('✅ Staff sorted by workload:', staffWithWorkload.map(s => `${s.name}: ${s.pendingCount}`));
       
       setStaffMembers(staffWithWorkload);
     } catch (e) {
@@ -150,14 +141,47 @@ export function AdminReports() {
     reloadAllReports();
     loadStaffMembers();
 
-    // Auto-refresh every 3 seconds
-    const interval = setInterval(() => {
-      reloadAllReports();
-      loadStaffMembers();
-    }, 3000); // 3 seconds
+    // Real-time subscription for instant report updates
+    const channel = supabase
+      .channel('admin-reports')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reports'
+        },
+        (payload) => {
+          console.log('🔄 Real-time report update:', payload);
+          
+          if (payload.eventType === 'INSERT') {
+            // New report added
+            const newReport = payload.new as any;
+            setAllReports(prev => [{
+              ...newReport,
+              status: newReport.status === 'resolved' ? 'completed' : (newReport.status || 'pending'),
+            }, ...prev]);
+          } else if (payload.eventType === 'UPDATE') {
+            // Report updated
+            const updatedReport = payload.new as any;
+            setAllReports(prev => prev.map(r => 
+              r.id === updatedReport.id ? {
+                ...updatedReport,
+                status: updatedReport.status === 'resolved' ? 'completed' : (updatedReport.status || 'pending'),
+              } : r
+            ));
+          } else if (payload.eventType === 'DELETE') {
+            // Report deleted
+            setAllReports(prev => prev.filter(r => r.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
 
-    // Cleanup interval on component unmount
-    return () => clearInterval(interval);
+    // Cleanup subscription on component unmount
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const rejectReport = async (reportId: string, note: string) => {
@@ -572,9 +596,16 @@ export function AdminReports() {
                         )}
                       </View>
                       <View style={styles.staffInfo}>
-                        <Text style={[styles.dropdownOptionText, { color: '#FFFFFF' }]}>
-                          {staff.name} ({staff.staff_id})
-                        </Text>
+                        <View style={styles.staffNameRow}>
+                          <Text style={[styles.dropdownOptionText, { color: '#FFFFFF' }]}>
+                            {staff.name} ({staff.staff_id})
+                          </Text>
+                          {staff.expertise && (
+                            <View style={styles.expertiseBadge}>
+                              <Text style={styles.expertiseText}>{staff.expertise}</Text>
+                            </View>
+                          )}
+                        </View>
                         <Text style={[styles.taskCountText, { color: (staff.pendingCount || 0) === 0 ? '#10B981' : (staff.pendingCount || 0) <= 2 ? '#F59E0B' : '#EF4444' }]}>
                           {(staff.pendingCount || 0) === 0 ? '✓ Available' : `${staff.pendingCount} in-progress ${staff.pendingCount === 1 ? 'issue' : 'issues'}`}
                         </Text>
@@ -1119,5 +1150,24 @@ const styles = StyleSheet.create({
   },
   staffInfo: {
     flex: 1,
+  },
+  staffNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  expertiseBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  expertiseText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#10B981',
   },
 });

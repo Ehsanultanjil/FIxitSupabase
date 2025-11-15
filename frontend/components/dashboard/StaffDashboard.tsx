@@ -62,7 +62,29 @@ export default function StaffDashboard() {
       await loadReports();
       setLoading(false);
     })();
-  }, []);
+
+    // Real-time subscription for staff's assigned reports
+    const channel = supabase
+      .channel('staff-reports')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reports',
+          filter: `assigned_to=eq.${(user as any)?.staff_id}`
+        },
+        (payload) => {
+          console.log('🔄 Staff report update:', payload);
+          loadReports(); // Refresh reports on any change
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [(user as any)?.staff_id]);
 
   const stats = {
     total: reports.length,

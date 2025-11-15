@@ -1,18 +1,20 @@
-# FixIt - Campus Reporting System
+# FixIt - Campus Reporting App
 
-A comprehensive campus maintenance reporting system built with React Native (Expo) and Node.js.
+A simple mobile app where students can report campus problems and staff can fix them.
 
-## Features
-- 🎓 **Student**: Report issues, view campus reports, manage profile
-- 👔 **Staff**: View assigned reports, update status, chat with admins
-- 👨‍💼 **Admin**: Assign reports to staff, manage users, full oversight
+## What Does It Do?
 
-## Tech Stack
-- **Frontend**: React Native, Expo, TypeScript
-- **Backend**: Node.js, Express, Firebase Firestore
-- **Real-time**: Socket.IO for live chat and updates
-- **Authentication**: JWT tokens with bcrypt password hashing
-- **Storage**: Firebase Firestore for data, Cloudinary for images
+- **Students** can report broken things on campus (like lights, doors, etc.)
+- **Staff** receive reports and fix the problems
+- **Admin** assigns reports to staff and manages everything
+- Everyone can chat in real-time to solve problems faster
+
+## What's Inside?
+
+- Built with **React Native** (Expo) - makes the mobile app
+- Uses **Supabase** - stores all data online
+- Has **real-time chat** - talk instantly without refreshing
+- **Profile pictures** work with Cloudinary
 
 ## Prerequisites
 

@@ -167,12 +167,7 @@ const handleSubmit = async () => {
       .select()
       .single();
 
-    if (reportError) {
-      console.error('Report submission error:', reportError);
-      throw new Error(reportError.message || 'Failed to submit report');
-    }
-
-    console.log('✅ Report created:', reportData);
+    if (reportError) throw new Error(reportError.message || 'Failed to submit report');
     setShowSuccess(true);
     
     // Clear form
@@ -181,7 +176,6 @@ const handleSubmit = async () => {
     }, 1500);
     
   } catch (error: any) {
-    console.error('Submit error:', error);
     setError(error.message || 'Something went wrong. Please try again.');
   } finally {
     setSubmitting(false);

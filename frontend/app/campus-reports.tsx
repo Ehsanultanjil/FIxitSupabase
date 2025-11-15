@@ -85,10 +85,8 @@ export default function CampusReports() {
         hasUpvoted: userUpvotes.includes(report.id),
       }));
       
-      console.log(`✅ Mapped ${mappedReports.length} reports`);
       setReports(mappedReports);
     } catch (error: any) {
-      console.error('❌ Failed to load reports:', error?.message || error);
       setReports([]);
     } finally {
       setLoading(false);
@@ -106,17 +104,10 @@ export default function CampusReports() {
   );
 
   const handleUpvote = async (reportId: string) => {
-    if (!user) {
-      console.log('User must be logged in to upvote');
-      return;
-    }
+    if (!user) return;
 
-    // Check if report is completed
     const report = reports.find(r => r.id === reportId);
-    if (report?.status === 'completed') {
-      console.log('Cannot upvote completed reports');
-      return;
-    }
+    if (report?.status === 'completed') return;
 
     try {
       // Optimistically update UI

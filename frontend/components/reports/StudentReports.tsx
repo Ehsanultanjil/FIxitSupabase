@@ -49,8 +49,6 @@ export function StudentReports() {
       setLoading(true);
       if (!user) return;
       
-      console.log('📊 StudentReports: Loading reports for student:', (user as any)?.student_id);
-      
       const { data, error } = await supabase
         .from('reports')
         .select('*')

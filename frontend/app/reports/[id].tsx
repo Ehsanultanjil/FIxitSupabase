@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/components/common/ThemeProvider';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/common/Card';
-import { ArrowLeft, MapPin, Clock, AlertTriangle, CheckCircle, Play, RefreshCw, MessageSquare } from 'lucide-react-native';
+import { ArrowLeft, MapPin, Clock, AlertTriangle, CheckCircle, Play, RefreshCw, MessageSquare, User, X } from 'lucide-react-native';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { supabase } from '@/config/supabase';
 
@@ -51,6 +51,14 @@ export default function ReportDetailsScreen() {
   const [conversationMessage, setConversationMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const scrollViewRef = React.useRef<ScrollView>(null);
+  
+  // Admin assign/reject states
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [rejectModalVisible, setRejectModalVisible] = useState(false);
+  const [staffMembers, setStaffMembers] = useState<any[]>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState('');
+  const [assignmentNote, setAssignmentNote] = useState('');
+  const [rejectionNote, setRejectionNote] = useState('');
 
   const formatDate = (val: any) => {
     const jsDate = val?.toDate ? val.toDate() : (typeof val === 'string' ? new Date(val) : new Date());
@@ -66,26 +74,18 @@ export default function ReportDetailsScreen() {
     return jsDate.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  const load = async () => {
+  const load = async (silent = false) => {
     try {
-      setLoading(true);
-      console.log('📄 Loading report:', id);
+      if (!silent) setLoading(true);
       
-      // Get report data
       const { data: reportData, error: reportError } = await supabase
         .from('reports')
         .select('*')
         .eq('id', id)
         .single();
       
-      if (reportError) {
-        console.error('❌ Supabase error:', reportError);
-        throw reportError;
-      }
+      if (reportError) throw reportError;
       
-      console.log('✅ Report loaded:', reportData);
-      
-      // Get student name if student_id exists
       let studentName = undefined;
       if (reportData.student_id) {
         const { data: studentData } = await supabase
@@ -114,7 +114,6 @@ export default function ReportDetailsScreen() {
         assignmentNote: reportData.assignment_note,
         rejectionNote: reportData.rejection_note,
       };
-      console.log('Conversation notes:', normalized.conversationNotes);
       setReport(normalized);
     } catch (e) {
       console.error('Load report failed', e);
@@ -124,8 +123,85 @@ export default function ReportDetailsScreen() {
     }
   };
 
+  // Load staff members for admin
+  const loadStaffMembers = async () => {
+    if (user?.role !== 'admin') return;
+    
+    try {
+      // Get staff users with expertise
+      const { data: staffData, error: staffError } = await supabase
+        .from('users')
+        .select('id, name, staff_id, profile_image, expertise')
+        .eq('role', 'staff')
+        .order('name', { ascending: true });
+      
+      if (staffError) throw staffError;
+
+      // Get all reports to calculate workload
+      const { data: reportsData, error: reportsError } = await supabase
+        .from('reports')
+        .select('assigned_to, status')
+        .not('assigned_to', 'is', null);
+      
+      if (reportsError) throw reportsError;
+
+      // Calculate pending count for each staff
+      const staffWithWorkload = (staffData || []).map((staff: any) => {
+        const assignedReports = (reportsData || []).filter((r: any) => r.assigned_to === staff.staff_id);
+        const pendingCount = assignedReports.filter((r: any) => r.status === 'in-progress').length;
+        
+        return {
+          ...staff,
+          pendingCount,
+        };
+      });
+
+      // Sort by pending count (least busy first)
+      staffWithWorkload.sort((a, b) => a.pendingCount - b.pendingCount);
+
+      setStaffMembers(staffWithWorkload);
+    } catch (e) {
+      console.error('Failed to load staff:', e);
+    }
+  };
+
   useEffect(() => { 
-    load(); 
+    load();
+    loadStaffMembers();
+    
+    // Real-time subscription for instant updates
+    const channel = supabase
+      .channel(`report:${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'reports',
+          filter: `id=eq.${id}`
+        },
+        (payload) => {
+          console.log('🔄 Real-time update received:', payload);
+          // Update report with new data
+          const newData = payload.new as any;
+          setReport(prev => prev ? {
+            ...prev,
+            status: newData.status === 'resolved' ? 'completed' : (newData.status || 'pending'),
+            conversationNotes: newData.conversation_notes || [],
+            statusNotes: newData.status_notes || [],
+            assignmentNote: newData.assignment_note,
+            rejectionNote: newData.rejection_note,
+            updatedAt: newData.updated_at,
+            assignedTo: newData.assigned_to,
+          } : prev);
+        }
+      )
+      .subscribe();
+    
+    // Cleanup subscription on component unmount
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [id]);
 
   // Auto-scroll to bottom when conversation notes change
@@ -146,7 +222,6 @@ export default function ReportDetailsScreen() {
   const updateStatus = async (newStatus: Report['status']) => {
     try {
       const statusChanged = report?.status !== newStatus;
-      console.log('🔄 Updating status to:', newStatus);
       
       const { error } = await supabase
         .from('reports')
@@ -166,6 +241,66 @@ export default function ReportDetailsScreen() {
     } catch (e) {
       console.error('Update status failed', e);
       Alert.alert('Error', 'Failed to update status');
+    }
+  };
+
+  // Admin: Assign to staff
+  const handleAssignToStaff = async () => {
+    if (!selectedStaffId) {
+      Alert.alert('Error', 'Please select a staff member');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('reports')
+        .update({
+          assigned_to: selectedStaffId,
+          status: 'in-progress',
+          assignment_note: assignmentNote || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Report assigned to staff');
+      setAssignModalVisible(false);
+      setSelectedStaffId('');
+      setAssignmentNote('');
+      await load();
+    } catch (e) {
+      console.error('Assign failed:', e);
+      Alert.alert('Error', 'Failed to assign report');
+    }
+  };
+
+  // Admin: Reject report
+  const handleRejectReport = async () => {
+    if (!rejectionNote.trim()) {
+      Alert.alert('Error', 'Please provide a rejection reason');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('reports')
+        .update({
+          status: 'rejected',
+          rejection_note: rejectionNote,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Report rejected');
+      setRejectModalVisible(false);
+      setRejectionNote('');
+      await load();
+    } catch (e) {
+      console.error('Reject failed:', e);
+      Alert.alert('Error', 'Failed to reject report');
     }
   };
 
@@ -245,6 +380,28 @@ export default function ReportDetailsScreen() {
         </View>
         <Text style={[styles.sectionLabel, { color: isDark ? theme.colors.text : '#FFFFFF' }]}>Description</Text>
         <Text style={[styles.description, { color: isDark ? theme.colors.textSecondary : '#D7E2FF' }]}>{report.description || 'No description provided.'}</Text>
+
+        {/* Admin Action Buttons */}
+        {user?.role === 'admin' && report.status === 'pending' && (
+          <View style={[styles.actionButtonsContainer, { backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.1)' }]}>
+            <View style={styles.actionButtonsRow}>
+              <TouchableOpacity 
+                style={[styles.actionButton, { backgroundColor: '#10B981', flex: 1 }]} 
+                onPress={() => setAssignModalVisible(true)}
+              >
+                <User size={18} color="#FFFFFF" />
+                <Text style={styles.actionText}>Assign to Staff</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.actionButton, { backgroundColor: '#DC2626', flex: 1 }]} 
+                onPress={() => setRejectModalVisible(true)}
+              >
+                <X size={18} color="#FFFFFF" />
+                <Text style={styles.actionText}>Reject</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Staff Status Change Buttons */}
         {user?.role === 'staff' && report.status !== 'completed' && (
@@ -465,9 +622,6 @@ export default function ReportDetailsScreen() {
                     const messageToSend = conversationMessage.trim();
                     setConversationMessage('');
                     
-                    console.log('💬 Sending message...');
-                    
-                    // Get current conversation notes and add new message
                     const newMessage = {
                       sender: user?.role === 'admin' ? 'admin' : 'staff',
                       senderName: user?.name || 'Unknown',
@@ -490,8 +644,11 @@ export default function ReportDetailsScreen() {
                     
                     console.log('✅ Message sent successfully');
                     
-                    // Refresh the report to show the new message
-                    await load();
+                    // Update local state instead of full reload
+                    setReport(prev => prev ? {
+                      ...prev,
+                      conversationNotes: updatedNotes
+                    } : prev);
                     
                     // Scroll to bottom to show the new message
                     setTimeout(() => {
@@ -612,6 +769,181 @@ export default function ReportDetailsScreen() {
           </View>
         </Modal>
 
+        {/* Assign Modal */}
+        <Modal
+          visible={assignModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setAssignModalVisible(false);
+            setSelectedStaffId('');
+            setAssignmentNote('');
+          }}
+        >
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              setAssignModalVisible(false);
+              setSelectedStaffId('');
+              setAssignmentNote('');
+            }}
+          >
+            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+              <View style={[styles.modalCard, { backgroundColor: '#000000', borderColor: 'rgba(255,255,255,0.2)' }]}>
+                <Text style={[styles.modalTitle, { color: '#FFFFFF' }]}>Assign to Staff</Text>
+                <Text style={[styles.modalMessage, { color: 'rgba(255,255,255,0.8)' }]}>
+                  Select a staff member to assign this report to. The report status will be changed to "in-progress".
+                </Text>
+              
+              <ScrollView style={styles.staffListScroll} showsVerticalScrollIndicator={false}>
+                {staffMembers.map((staff) => (
+                  <TouchableOpacity
+                    key={staff.staff_id}
+                    style={[styles.dropdownOption, { 
+                      backgroundColor: selectedStaffId === staff.staff_id ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.1)',
+                      borderBottomColor: 'rgba(255,255,255,0.1)'
+                    }]}
+                    onPress={() => setSelectedStaffId(staff.staff_id)}
+                  >
+                    <View style={styles.staffOptionContainer}>
+                      <View style={styles.staffImageContainer}>
+                        {staff.profile_image ? (
+                          <Image 
+                            source={{ uri: staff.profile_image }} 
+                            style={styles.staffImage}
+                          />
+                        ) : (
+                          <View style={[styles.staffImagePlaceholder, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                            <User size={20} color="rgba(255,255,255,0.7)" />
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.staffInfo}>
+                        <View style={styles.staffNameRow}>
+                          <Text style={[styles.dropdownOptionText, { 
+                            color: selectedStaffId === staff.staff_id ? '#10B981' : '#FFFFFF',
+                            fontWeight: selectedStaffId === staff.staff_id ? '700' : '600'
+                          }]}>
+                            {staff.name} ({staff.staff_id})
+                          </Text>
+                          {staff.expertise && (
+                            <View style={styles.expertiseBadge}>
+                              <Text style={styles.expertiseText}>{staff.expertise}</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={[styles.taskCountText, { 
+                          color: (staff.pendingCount || 0) === 0 ? '#10B981' : (staff.pendingCount || 0) <= 2 ? '#F59E0B' : '#EF4444' 
+                        }]}>
+                          {(staff.pendingCount || 0) === 0 ? '✓ Available' : `${staff.pendingCount} in-progress ${staff.pendingCount === 1 ? 'issue' : 'issues'}`}
+                        </Text>
+                      </View>
+                      {selectedStaffId === staff.staff_id && (
+                        <CheckCircle size={20} color="#10B981" />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <TextInput
+                style={[styles.modalInput, { 
+                  backgroundColor: 'rgba(255,255,255,0.1)', 
+                  borderColor: 'rgba(255,255,255,0.2)',
+                  color: '#FFFFFF',
+                  minHeight: 60,
+                  marginTop: 12,
+                }]}
+                value={assignmentNote}
+                onChangeText={setAssignmentNote}
+                placeholder="Add assignment notes (optional)..."
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                multiline
+              />
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalButton, { borderColor: 'rgba(255,255,255,0.2)' }]}
+                  onPress={() => {
+                    setAssignModalVisible(false);
+                    setSelectedStaffId('');
+                    setAssignmentNote('');
+                  }}
+                >
+                  <Text style={[styles.modalButtonText, { color: 'rgba(255,255,255,0.8)' }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: '#10B981', borderColor: '#10B981' }]}
+                  onPress={handleAssignToStaff}
+                >
+                  <Text style={[styles.modalButtonText, { color: '#FFFFFF' }]}>Assign Report</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Reject Modal */}
+        <Modal
+          visible={rejectModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setRejectModalVisible(false);
+            setRejectionNote('');
+          }}
+        >
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              setRejectModalVisible(false);
+              setRejectionNote('');
+            }}
+          >
+            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+              <View style={[styles.modalCard, { backgroundColor: '#000000', borderColor: 'rgba(255,255,255,0.2)' }]}>
+                <Text style={[styles.modalTitle, { color: '#FFFFFF' }]}>Reject Report</Text>
+                <Text style={[styles.modalMessage, { color: 'rgba(255,255,255,0.8)' }]}>
+                  Please provide a reason for rejecting this report. This note will be visible to the student.
+                </Text>
+              <TextInput
+                style={[styles.modalInput, { 
+                  backgroundColor: 'rgba(255,255,255,0.1)', 
+                  borderColor: 'rgba(255,255,255,0.2)',
+                  color: '#FFFFFF'
+                }]}
+                value={rejectionNote}
+                onChangeText={setRejectionNote}
+                placeholder="Enter rejection reason..."
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                multiline
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalButton, { borderColor: 'rgba(255,255,255,0.2)' }]}
+                  onPress={() => {
+                    setRejectModalVisible(false);
+                    setRejectionNote('');
+                  }}
+                >
+                  <Text style={[styles.modalButtonText, { color: 'rgba(255,255,255,0.8)' }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: '#DC2626', borderColor: '#DC2626' }]}
+                  onPress={handleRejectReport}
+                  disabled={!rejectionNote.trim()}
+                >
+                  <Text style={[styles.modalButtonText, { color: '#FFFFFF' }]}>Reject Report</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+
       </Card>
       </ScrollView>
       </KeyboardAvoidingView>
@@ -689,37 +1021,110 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   // Modal styles
-  modalOverlay: {
+  modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    padding: 24,
   },
-  modalContent: {
+  modalCard: {
     width: '100%',
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
+    marginBottom: 8,
+  },
+  modalMessage: {
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  modalInput: {
+    minHeight: 80,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
     marginBottom: 16,
+    textAlignVertical: 'top',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  modalButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  modalButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  staffListScroll: {
+    maxHeight: 200,
+    marginBottom: 8,
+  },
+  dropdownOption: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  staffOptionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  staffImageContainer: {
+    marginRight: 12,
+  },
+  staffImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  staffImagePlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  staffInfo: {
+    flex: 1,
+  },
+  staffNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  dropdownOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  taskCountText: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  expertiseBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  expertiseText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#10B981',
   },
   noteInput: {
     borderRadius: 8,
@@ -727,20 +1132,6 @@ const styles = StyleSheet.create({
     minHeight: 100,
     textAlignVertical: 'top',
     marginBottom: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  modalButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  modalButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
   },
   // Chat UI Styles
   chatHeader: {

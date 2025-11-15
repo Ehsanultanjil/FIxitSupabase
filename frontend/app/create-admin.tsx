@@ -130,17 +130,13 @@ export default function CreateAdminScreen() {
       </LinearGradient>
 
       <View style={styles.form}> 
-        <View style={[styles.infoBox, { backgroundColor: isDark ? 'rgba(220, 38, 38, 0.1)' : 'rgba(220, 38, 38, 0.05)', borderColor: '#DC2626' }]}>
+        <Text style={[styles.label, { color: theme.colors.text }]}>Admin ID</Text>
+        <View style={[styles.input, styles.disabledInput, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
           {fetchingId ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <ActivityIndicator size="small" color="#DC2626" />
-              <Text style={[styles.infoText, { color: isDark ? '#FCA5A5' : '#DC2626' }]}>
-                Loading next Admin ID...
-              </Text>
-            </View>
+            <ActivityIndicator size="small" color={theme.colors.textSecondary} />
           ) : (
-            <Text style={[styles.infoText, { color: isDark ? '#FCA5A5' : '#DC2626' }]}>
-              🆔 Next Admin ID: <Text style={{ fontWeight: '700', fontSize: 15 }}>{nextAdminId}</Text>
+            <Text style={[styles.disabledText, { color: theme.colors.textSecondary }]}>
+              {nextAdminId}
             </Text>
           )}
         </View>
@@ -230,6 +226,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  disabledInput: {
+    opacity: 0.6,
+    justifyContent: 'center',
+  },
+  disabledText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
   submit: {
     marginTop: 10,

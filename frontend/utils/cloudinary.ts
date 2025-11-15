@@ -73,8 +73,6 @@ export async function uploadImageAsync(uri: string, opts?: { folder?: string; up
     const allowed = /^[A-Za-z0-9_\/-]+$/;
     if (allowed.test(safe) && !safe.includes(':')) {
       formData.append('folder', safe);
-    } else {
-      console.warn('Skipping unsafe Cloudinary folder value:', rawFolder);
     }
   }
 
@@ -103,25 +101,6 @@ export function getCloudinaryUrl(publicId: string, transformation?: string): str
   return `${base}${tx}${publicId}`;
 }
 
-// Convenience helper for common responsive thumbnail
 export function thumbnailUrl(publicId: string, size = 200): string {
   return getCloudinaryUrl(publicId, `c_fill,w_${size},h_${size},q_auto,f_auto`);
 }
-
-/*
-Usage example (Expo ImagePicker):
-
-import * as ImagePicker from 'expo-image-picker';
-import { uploadImageAsync, thumbnailUrl } from '../utils/cloudinary';
-
-const pickAndUpload = async () => {
-  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 });
-  if (result.canceled) return;
-  const uri = result.assets[0].uri;
-  const uploaded = await uploadImageAsync(uri, { folder: 'app-uploads' });
-  console.log('Secure URL:', uploaded.secure_url);
-  console.log('Public ID:', uploaded.public_id);
-  const thumb = thumbnailUrl(uploaded.public_id, 300);
-  console.log('Thumb URL:', thumb);
-};
-*/

@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Clock, FileText, CheckCircle, Play, AlertTriangle } from 'lucide-react-native';
+import { Clock, FileText, CheckCircle, Play, AlertTriangle, MessageSquare } from 'lucide-react-native';
 import { Card } from '@/components/common/Card';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/components/common/ThemeProvider';
 import { supabase } from '@/config/supabase';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface ActivityEntry {
   id: string;
@@ -15,14 +16,17 @@ interface ActivityEntry {
   issueTitle?: string;
   status?: string;
   priority?: string;
+  reportId?: string;
 }
 
 export default function ActivityScreen() {
   const { user } = useAuth();
   const { theme, isDark } = useTheme();
+  const router = useRouter();
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [unseenCount, setUnseenCount] = useState(0);
   const isAdmin = user?.role === 'admin';
   const isStaff = user?.role === 'staff';
 
@@ -85,6 +89,17 @@ export default function ActivityScreen() {
         return bt - at;
       });
       setActivityLog(activities);
+      
+      // Calculate unseen count based on last seen timestamp
+      const lastSeenStr = await AsyncStorage.getItem(`lastSeenActivity_${user.id}`);
+      const lastSeen = lastSeenStr ? new Date(lastSeenStr) : new Date(0);
+      
+      const unseenActivities = activities.filter(a => {
+        const timestamp = (a as any).timestamp?.toDate ? (a as any).timestamp.toDate() : new Date((a as any).timestamp || 0);
+        return timestamp > lastSeen;
+      });
+      
+      setUnseenCount(unseenActivities.length);
     } catch (err) {
       console.error('Activity load error:', err);
       setActivityLog([]);
@@ -101,8 +116,16 @@ export default function ActivityScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Mark notifications as seen when user opens the tab
+      const markAsSeen = async () => {
+        if (user?.id) {
+          await AsyncStorage.setItem(`lastSeenActivity_${user.id}`, new Date().toISOString());
+          setUnseenCount(0);
+        }
+      };
+      markAsSeen();
       loadActivity();
-    }, [loadActivity])
+    }, [loadActivity, user])
   );
 
   const generateActivityFromReports = (reports: any[], userRole: string): ActivityEntry[] => {
@@ -117,6 +140,7 @@ export default function ActivityScreen() {
           timestamp: report.createdAt,
           issueTitle: report.title,
           priority: report.priority,
+          reportId: report.id,
         });
       } else if (userRole === 'student') {
         activities.push({
@@ -125,6 +149,7 @@ export default function ActivityScreen() {
           timestamp: report.createdAt,
           issueTitle: report.title,
           priority: report.priority,
+          reportId: report.id,
         });
       } else if (userRole === 'staff' && report.assignedTo) {
         // Staff sees when they were assigned
@@ -134,27 +159,62 @@ export default function ActivityScreen() {
           timestamp: report.createdAt,
           issueTitle: report.title,
           priority: report.priority,
+          reportId: report.id,
         });
       }
 
-      // Status update activities
+      // Chat message activities - only show messages received from others
+      if (Array.isArray(report.conversation_notes) && report.conversation_notes.length > 0) {
+        report.conversation_notes.forEach((msg: any, idx: number) => {
+          // Skip messages sent by the current user
+          const isSentByCurrentUser = 
+            (userRole === 'admin' && msg.sender === 'admin') ||
+            (userRole === 'staff' && msg.sender === 'staff');
+          
+          if (!isSentByCurrentUser && msg.message) {
+            const senderName = msg.senderName || msg.sender;
+            activities.push({
+              id: `msg-${report.id}-${idx}`,
+              action: `${senderName}: ${msg.message.substring(0, 50)}${msg.message.length > 50 ? '...' : ''}`,
+              timestamp: msg.createdAt,
+              issueTitle: report.title,
+              status: report.status,
+              reportId: report.id,
+            });
+          }
+        });
+      }
+
+      // Status update activities - only show actual status changes (not message updates)
       if (report.status !== 'pending' && report.updatedAt && report.updatedAt !== report.createdAt) {
-        if (userRole === 'staff') {
-          activities.push({
-            id: `status-${report.id}`,
-            action: `You updated report status to ${report.status}`,
-            timestamp: report.updatedAt,
-            issueTitle: report.title,
-            status: report.status,
+        // Only show if there are no recent messages (avoid duplicate notifications)
+        const hasRecentMessages = Array.isArray(report.conversation_notes) && 
+          report.conversation_notes.some((msg: any) => {
+            const msgTime = new Date(msg.createdAt).getTime();
+            const updateTime = new Date(report.updatedAt).getTime();
+            return Math.abs(msgTime - updateTime) < 2000; // Within 2 seconds
           });
-        } else {
-          activities.push({
-            id: `status-${report.id}`,
-            action: `Report status updated to ${report.status}`,
-            timestamp: report.updatedAt,
-            issueTitle: report.title,
-            status: report.status,
-          });
+        
+        if (!hasRecentMessages) {
+          if (userRole === 'staff') {
+            activities.push({
+              id: `status-${report.id}`,
+              action: `Report status changed to ${report.status}`,
+              timestamp: report.updatedAt,
+              issueTitle: report.title,
+              status: report.status,
+              reportId: report.id,
+            });
+          } else {
+            activities.push({
+              id: `status-${report.id}`,
+              action: `Report status updated to ${report.status}`,
+              timestamp: report.updatedAt,
+              issueTitle: report.title,
+              status: report.status,
+              reportId: report.id,
+            });
+          }
         }
       }
 
@@ -168,6 +228,7 @@ export default function ActivityScreen() {
               timestamp: n.createdAt || report.updatedAt || report.createdAt,
               issueTitle: report.title,
               status: n.statusAtTime === 'resolved' ? 'completed' : (n.statusAtTime || undefined),
+              reportId: report.id,
             });
           }
         });
@@ -183,6 +244,7 @@ export default function ActivityScreen() {
               timestamp: n.createdAt || report.updatedAt || report.createdAt,
               issueTitle: report.title,
               status: n.statusAtTime === 'resolved' ? 'completed' : (n.statusAtTime || undefined),
+              reportId: report.id,
             });
           } else if (n?.byRole === 'staff') {
             // Show staff their own notes
@@ -192,6 +254,7 @@ export default function ActivityScreen() {
               timestamp: n.createdAt || report.updatedAt || report.createdAt,
               issueTitle: report.title,
               status: n.statusAtTime === 'resolved' ? 'completed' : (n.statusAtTime || undefined),
+              reportId: report.id,
             });
           }
         });
@@ -216,6 +279,10 @@ export default function ActivityScreen() {
   };
 
   const getActivityIcon = (entry: ActivityEntry) => {
+    if (entry.action.includes(':') && !entry.action.includes('submitted')) {
+      // Message format: "Name: message text"
+      return <MessageSquare size={20} color="#3B82F6" />;
+    }
     if (entry.action.includes('submitted')) {
       return entry.priority === 'urgent' 
         ? <AlertTriangle size={20} color="#DC2626" />
@@ -314,7 +381,16 @@ export default function ActivityScreen() {
         activityLog.map((entry, index) => {
           const { date, time } = formatDate(entry.timestamp);
           return (
-            <View key={entry.id} style={[styles.activityCardWrapper]}>
+            <TouchableOpacity 
+              key={entry.id} 
+              style={[styles.activityCardWrapper]}
+              onPress={() => {
+                if (entry.reportId) {
+                  router.push(`/reports/${entry.reportId}`);
+                }
+              }}
+              activeOpacity={0.7}
+            >
               {isDark ? (
                 <LinearGradient
                   colors={getGradientColors()}
@@ -402,7 +478,7 @@ export default function ActivityScreen() {
                   )}
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
           );
         })
       )}

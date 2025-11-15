@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Alert, ActivityIndicator, TouchableOpacity, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Button } from '@/components/common/Button';
 import { useTheme } from '@/components/common/ThemeProvider';
 import { supabase } from '@/config/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, ChevronDown } from 'lucide-react-native';
 
 export default function CreateStaffScreen() {
   const { theme, isDark } = useTheme();
@@ -15,7 +15,19 @@ export default function CreateStaffScreen() {
   const [nextStaffId, setNextStaffId] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [expertise, setExpertise] = useState('General Maintenance');
+  const [showExpertiseDropdown, setShowExpertiseDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const expertiseOptions = [
+    'Electrician',
+    'Plumber',
+    'Carpenter',
+    'HVAC',
+    'General Maintenance',
+    'IT Support',
+    'Cleaner'
+  ];
 
   // Fetch next staff ID on mount
   useEffect(() => {
@@ -87,6 +99,7 @@ export default function CreateStaffScreen() {
           name: name,
           role: 'staff',
           staff_id: nextStaffId,
+          expertise: expertise,
           password_hash: password, // Will be hashed by SQL trigger
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -101,9 +114,10 @@ export default function CreateStaffScreen() {
 
       console.log('✅ Staff created successfully');
       
-      Alert.alert('Success', `Staff ${name} created successfully!\n\nID: ${nextStaffId}\nPassword: ${password}\n\nThey can login with ID ${nextStaffId}`);
+      Alert.alert('Success', `Staff ${name} created successfully!\n\nID: ${nextStaffId}\nExpertise: ${expertise}\nPassword: ${password}\n\nThey can login with ID ${nextStaffId}`);
       setName('');
       setPassword('');
+      setExpertise('General Maintenance');
       
       // Refresh next staff ID after creation
       await fetchNextStaffId();
@@ -117,7 +131,7 @@ export default function CreateStaffScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: '#000000' }]}>
+    <ScrollView style={[styles.container, { backgroundColor: '#000000' }]}>
       <TouchableOpacity 
         style={styles.backButton}
         onPress={() => router.back()}
@@ -137,13 +151,12 @@ export default function CreateStaffScreen() {
       </LinearGradient>
 
       <View style={styles.form}>
-        {nextStaffId && (
-          <View style={[styles.infoBox, { backgroundColor: isDark ? '#065F46' : '#D1FAE5', borderColor: '#10B981' }]}>
-            <Text style={[styles.infoText, { color: isDark ? '#D1FAE5' : '#065F46' }]}>
-              🆔 Next Staff ID: <Text style={{ fontWeight: '700' }}>{nextStaffId}</Text>
-            </Text>
-          </View>
-        )}
+        <Text style={[styles.label, { color: theme.colors.text }]}>Staff ID</Text>
+        <View style={[styles.input, styles.disabledInput, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+          <Text style={[styles.disabledText, { color: theme.colors.textSecondary }]}>
+            {nextStaffId || 'Loading...'}
+          </Text>
+        </View>
 
         <Text style={[styles.label, { color: theme.colors.text }]}>Name</Text>
         <TextInput
@@ -164,6 +177,40 @@ export default function CreateStaffScreen() {
           secureTextEntry
         />
 
+        <Text style={[styles.label, { color: theme.colors.text }]}>Expertise</Text>
+        <TouchableOpacity
+          style={[styles.dropdown, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}
+          onPress={() => setShowExpertiseDropdown(!showExpertiseDropdown)}
+        >
+          <Text style={[styles.dropdownText, { color: theme.colors.text }]}>{expertise}</Text>
+          <ChevronDown size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+
+        {showExpertiseDropdown && (
+          <View style={[styles.dropdownList, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <ScrollView style={styles.dropdownScrollView} nestedScrollEnabled>
+              {expertiseOptions.map((option) => (
+                <TouchableOpacity
+                  key={option}
+                  style={[
+                    styles.dropdownOption,
+                    { borderBottomColor: theme.colors.border },
+                    expertise === option && { backgroundColor: 'rgba(16, 185, 129, 0.1)' }
+                  ]}
+                  onPress={() => {
+                    setExpertise(option);
+                    setShowExpertiseDropdown(false);
+                  }}
+                >
+                  <Text style={[styles.dropdownOptionText, { color: theme.colors.text }]}>
+                    {option}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         <Button
           title={loading ? 'Creating…' : 'Create Staff'}
           onPress={handleCreate}
@@ -173,7 +220,7 @@ export default function CreateStaffScreen() {
         />
         {loading && <ActivityIndicator style={{ marginTop: 12 }} color={'#10B981'} />}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -218,6 +265,44 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  disabledInput: {
+    opacity: 0.6,
+    justifyContent: 'center',
+  },
+  disabledText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  dropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  dropdownText: {
+    fontSize: 16,
+  },
+  dropdownList: {
+    borderWidth: 1,
+    borderRadius: 12,
+    marginTop: 4,
+    maxHeight: 200,
+    overflow: 'hidden',
+  },
+  dropdownScrollView: {
+    maxHeight: 200,
+  },
+  dropdownOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  dropdownOptionText: {
+    fontSize: 16,
   },
   submit: {
     marginTop: 10,

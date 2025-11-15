@@ -66,7 +66,29 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     fetchMyReports();
-  }, []);
+
+    // Real-time subscription for student's reports
+    const channel = supabase
+      .channel('student-reports')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reports',
+          filter: `student_id=eq.${user?.student_id}`
+        },
+        (payload) => {
+          console.log('🔄 Student report update:', payload);
+          fetchMyReports(); // Refresh reports on any change
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.student_id]);
 
   useFocusEffect(
     React.useCallback(() => {
